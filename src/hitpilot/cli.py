@@ -1,4 +1,4 @@
-"""Typer CLI for HitPilot hygiene, properties, novelty, diversity, and scoring."""
+"""Typer CLI for HitPilot hygiene, properties, novelty, scoring, and dossiers."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from hitpilot.benchmark import run_litpcba_benchmark
 from hitpilot.data.litpcba import KNOWN_TARGETS, LitPcbaError, fetch_litpcba, normalize_target
 from hitpilot.diversity import run_diversity_file
+from hitpilot.dossier import DossierConfig, generate_medchem_dossier_from_dirs
 from hitpilot.hygiene import run_hygiene_file
 from hitpilot.mcp_server import create_chem_mcp_server
 from hitpilot.models import (
@@ -791,6 +793,134 @@ def score_command(
                             values.append("")
             table.add_row(*values)
         console.print(table)
+
+
+@app.command("dossier")
+def dossier_command(
+    phase1_dir: Path = typer.Option(..., "--phase1-dir", exists=True, file_okay=False),
+    phase2_dir: Path = typer.Option(..., "--phase2-dir", exists=True, file_okay=False),
+    phase3_dir: Path = typer.Option(..., "--phase3-dir", exists=True, file_okay=False),
+    output_dir: Path = typer.Option(..., "--output-dir", "-o"),
+    target: str = typer.Option("ESR1_ant", "--target"),
+    target_chembl_id: str = typer.Option("CHEMBL206", "--target-chembl-id"),
+    top_n: int = typer.Option(25, "--top-n"),
+) -> None:
+    """Write a publication-grade med-chem dossier from Phase 1-3 output directories."""
+    description = (KNOWN_TARGETS.get(normalize_target(target), {}) or {}).get("description") or ""
+    result = generate_medchem_dossier_from_dirs(
+        output_dir,
+        phase1_dir=phase1_dir,
+        phase2_dir=phase2_dir,
+        phase3_dir=phase3_dir,
+        config=DossierConfig(
+            target=normalize_target(target),
+            target_chembl_id=target_chembl_id,
+            target_description=str(description),
+            top_n=top_n,
+        ),
+    )
+    console.print(f"[green]Wrote[/green] {result.markdown_path}")
+    console.print(f"[green]Wrote[/green] {result.html_path}")
+    console.print(f"[green]Wrote[/green] {result.manifest_path}")
+    for name, path in result.figures.items():
+        console.print(f"[green]Wrote[/green] {path}")
+    funnel = result.manifest.summary.get("funnel") or []
+    rows = [(item["stage"], item["count"]) for item in funnel]
+    if rows:
+        _print_kv_table("Triage funnel", rows)
+    enrichment = result.manifest.summary.get("enrichment") or {}
+    if enrichment:
+        _print_kv_table(
+            "Enrichment",
+            [
+                ("ROC-AUC", enrichment.get("roc_auc")),
+                ("PR-AUC", enrichment.get("pr_auc")),
+                ("EF 1%", enrichment.get("ef_1pct")),
+                ("BEDROC α=20", enrichment.get("bedroc_20")),
+                ("Hits top 25", enrichment.get("hits_top_25")),
+            ],
+        )
+
+
+@app.command("benchmark")
+def benchmark_command(
+    target: str = typer.Argument("ESR1_ant", help="LIT-PCBA target name, e.g. ESR1_ant."),
+    output_dir: Path = typer.Option(..., "--output-dir", "-o"),
+    target_chembl_id: str = typer.Option("CHEMBL206", "--target-chembl-id"),
+    data_dir: Path = typer.Option(Path("data/litpcba"), "--data-dir"),
+    chembl_cache_dir: Path = typer.Option(Path("data/chembl"), "--chembl-cache-dir"),
+    scores_csv: Optional[Path] = typer.Option(
+        None,
+        "--scores-csv",
+        help="Optional external scorer CSV. If omitted, a leak-free _T->_V baseline is trained.",
+    ),
+    top_n: int = typer.Option(25, "--top-n"),
+    exclusion_similarity: float = typer.Option(0.65, "--exclusion-similarity"),
+    pchembl_min: float = typer.Option(6.0, "--pchembl-min"),
+    max_records: int = typer.Option(2000, "--max-records"),
+    random_state: int = typer.Option(42, "--random-state"),
+) -> None:
+    """Run the full Phase 1-4 public benchmark and write a med-chem dossier."""
+    try:
+        result = run_litpcba_benchmark(
+            target=target,
+            output_dir=output_dir,
+            target_chembl_id=target_chembl_id,
+            data_dir=data_dir,
+            chembl_cache_dir=chembl_cache_dir,
+            scores_csv=scores_csv,
+            top_n=top_n,
+            exclusion_similarity=exclusion_similarity,
+            pchembl_min=pchembl_min,
+            max_records=max_records,
+            random_state=random_state,
+        )
+    except (FileNotFoundError, ValueError, LitPcbaError) as exc:
+        console.print(f"[red]Benchmark failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[green]Wrote[/green] {output_dir / 'benchmark_manifest.json'}")
+    dossier = result.get("dossier") or {}
+    console.print(f"[green]Dossier[/green] {dossier.get('markdown_path')}")
+    console.print(f"[green]HTML[/green] {dossier.get('html_path')}")
+    hygiene = (result.get("hygiene") or {}).get("summary") or {}
+    _print_kv_table(
+        f"Benchmark {result['target']}",
+        [
+            ("LIT-PCBA cached", result.get("cached_litpcba")),
+            ("Hygiene input", hygiene.get("n_total")),
+            ("Hygiene passed", hygiene.get("n_passed")),
+            ("Ranked (scored)", result.get("n_ranked")),
+            ("Diverse shortlist", result.get("n_shortlist")),
+        ],
+    )
+    scoring = result.get("scoring") or {}
+    enrichment = scoring.get("enrichment") or {}
+    if enrichment:
+        _print_kv_table(
+            "Enrichment (leak-free held-out _V, hygiene-matched)",
+            [
+                ("N scored", enrichment.get("n_compounds")),
+                ("Actives", enrichment.get("n_actives")),
+                ("ROC-AUC", enrichment.get("roc_auc")),
+                ("PR-AUC", enrichment.get("pr_auc")),
+                ("EF 1%", enrichment.get("ef_1pct")),
+                ("EF 5%", enrichment.get("ef_5pct")),
+                ("EF 10%", enrichment.get("ef_10pct")),
+                ("BEDROC α=20", enrichment.get("bedroc_20")),
+                ("Hits top 25", enrichment.get("hits_top_25")),
+            ],
+        )
+    baseline = result.get("baseline") or {}
+    if baseline:
+        leak = baseline.get("valid_leakfree") or {}
+        _print_kv_table(
+            "Leak-free baseline",
+            [
+                ("Overlap removed", baseline.get("n_overlap_removed")),
+                ("_V scored", leak.get("n")),
+                ("_V actives", leak.get("n_active")),
+            ],
+        )
 
 
 @app.command("mcp")

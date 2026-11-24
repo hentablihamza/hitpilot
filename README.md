@@ -113,6 +113,38 @@ Sample MCP client config:
 }
 ```
 
+
+## Phase 4 quickstart
+
+Phase 4 writes a publication-grade med-chem dossier (Markdown + a self-contained
+HTML report with embedded figures) and a one-command public benchmark that
+runs Phases 1-3 and then the dossier on a LIT-PCBA target.
+
+```bash
+# One-command public benchmark (reuses cached data/litpcba and data/chembl)
+.venv/bin/hitpilot benchmark ESR1_ant \
+  --target-chembl-id CHEMBL206 \
+  --output-dir outputs/benchmark_ESR1_ant \
+  --top-n 25
+
+# Or build a dossier from existing Phase 1-3 output directories
+.venv/bin/hitpilot dossier \
+  --phase1-dir outputs/phase1_ESR1_ant \
+  --phase2-dir outputs/phase2_ESR1_ant \
+  --phase3-dir outputs/phase3_ESR1_ant \
+  --output-dir outputs/dossier_ESR1_ant \
+  --target ESR1_ant --target-chembl-id CHEMBL206 --top-n 25
+```
+
+Dossier outputs (under `<output_dir>/` or `outputs/benchmark_ESR1_ant/dossier/`):
+
+- `medchem_dossier.md` — funnel, enrichment table, top-25 diverse shortlist, scaffold and alert audits, plus relative `figures/*.png` links
+- `medchem_dossier.html` — the same report as a single self-contained file (figures embedded as base64 data URIs)
+- `dossier_manifest.json` — SHA-256 hashes of all inputs and artifacts plus key summary metrics
+- `figures/top_shortlist_grid.png`, `flagged_alerts_grid.png`, `physchem_distributions.png`, `enrichment_and_triage_funnel.png`, `scaffold_and_clusters.png`
+
+Pass `--scores-csv` to `hitpilot benchmark` to use an external docking or ML rescorer instead of the leak-free `_T` to `_V` ECFP4 random-forest baseline.
+
 ## Five-phase roadmap
 
 1. **Phase 1 — Hygiene and alerts.** RDKit parsing and sanitization, salt/solvent

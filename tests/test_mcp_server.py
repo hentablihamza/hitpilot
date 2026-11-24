@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "evaluate_rescorer_csv",
     "run_hygiene_csv",
     "run_phase2_csv",
+    "generate_medchem_dossier",
 }
 
 
@@ -37,7 +38,7 @@ def _payload(result) -> dict:
     return json.loads(text)
 
 
-def test_chemmcp_registers_eight_tools_with_schemas():
+def test_chemmcp_registers_nine_tools_with_schemas():
     async def _run():
         server = create_chem_mcp_server()
         assert server.name == "ChemMCP"

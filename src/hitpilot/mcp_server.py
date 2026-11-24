@@ -8,6 +8,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from hitpilot.diversity import run_diversity
+from hitpilot.dossier import DossierConfig, generate_medchem_dossier_from_dirs
 from hitpilot.hygiene import run_hygiene, run_hygiene_file
 from hitpilot.io_utils import rdkit_version
 from hitpilot.models import DiversityConfig, HygieneConfig, NoveltyConfig
@@ -41,7 +42,7 @@ def _rows_from_smiles(smiles_list: list[str]) -> list[dict[str, Any]]:
 
 
 def create_chem_mcp_server() -> MCPServer:
-    """Build a ChemMCP server with all eight typed hit-triage tools registered."""
+    """Build a ChemMCP server with all nine typed hit-triage tools registered."""
     server = MCPServer(
         name="ChemMCP",
         instructions=INSTRUCTIONS,
@@ -239,6 +240,30 @@ def create_chem_mcp_server() -> MCPServer:
             "outputs": manifest.outputs,
             "input_sha256": manifest.input_sha256,
         }
+
+    @server.tool()
+    def generate_medchem_dossier(
+        output_dir: str,
+        phase1_dir: str,
+        phase2_dir: str,
+        phase3_dir: str,
+        target: str = "ESR1_ant",
+        target_chembl_id: str = "CHEMBL206",
+        top_n: int = 25,
+    ) -> dict[str, Any]:
+        """Write a publication-grade med-chem dossier from Phase 1-3 output directories."""
+        result = generate_medchem_dossier_from_dirs(
+            output_dir,
+            phase1_dir=phase1_dir,
+            phase2_dir=phase2_dir,
+            phase3_dir=phase3_dir,
+            config=DossierConfig(
+                target=target,
+                target_chembl_id=target_chembl_id,
+                top_n=top_n,
+            ),
+        )
+        return result.model_dump(mode="json")
 
     return server
 

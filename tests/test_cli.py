@@ -338,3 +338,11 @@ def test_cli_lists_phase3_commands():
     assert result.exit_code == 0, result.output
     for name in ("baseline-score", "score", "mcp"):
         assert name in result.output
+
+
+
+def test_cli_lists_phase4_commands():
+    result = runner.invoke(app, ["--help"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    for name in ("dossier", "benchmark"):
+        assert name in result.output

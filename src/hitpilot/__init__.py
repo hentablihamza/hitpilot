@@ -1,6 +1,14 @@
 """HitPilot: auditable hit-triage and med-chem copilot."""
 
+from hitpilot.benchmark import run_litpcba_benchmark
 from hitpilot.diversity import run_diversity, run_diversity_file
+from hitpilot.dossier import (
+    DossierConfig,
+    DossierManifest,
+    DossierResult,
+    generate_medchem_dossier,
+    generate_medchem_dossier_from_dirs,
+)
 from hitpilot.hygiene import run_hygiene, run_hygiene_file, standardize_smiles
 from hitpilot.mcp_server import create_chem_mcp_server
 from hitpilot.models import (
@@ -64,16 +72,22 @@ __all__ = [
     "ScoredShortlistRecord",
     "ScorerHookConfig",
     "ScoringSummary",
+    "DossierConfig",
+    "DossierManifest",
+    "DossierResult",
     "compute_enrichment_metrics",
     "create_chem_mcp_server",
     "fetch_chembl_target_actives",
     "generate_litpcba_baseline_scores",
+    "generate_medchem_dossier",
+    "generate_medchem_dossier_from_dirs",
     "lookup_pubchem_compound",
     "merge_external_scores",
     "run_diversity",
     "run_diversity_file",
     "run_hygiene",
     "run_hygiene_file",
+    "run_litpcba_benchmark",
     "run_novelty",
     "run_novelty_file",
     "run_phase2_file",
