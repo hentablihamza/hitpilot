@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: HitPilot
+message: If you use this software, please cite it using these metadata.
+type: software
+authors:
+  - family-names: Hentabli
+    given-names: Hamza
+version: "0.1.0"
+date-released: "2026-11-24"
+license: MIT
+repository-code: "https://github.com/hentablihamza/hitpilot"
+url: "https://github.com/hentablihamza/hitpilot"
+abstract: >-
+  HitPilot is an open-source, auditable hit-triage and medicinal-chemistry
+  copilot. It standardizes public screening libraries with RDKit, applies
+  PAINS, Brenk, and NIH structural alerts, computes physicochemical properties
+  and ChEMBL/PubChem novelty, selects diverse scaffolds, exposes a ChemMCP
+  tool layer, joins an external docking or ML rescorer CSV, reports leak-checked
+  virtual-screening enrichment, and writes a shareable med-chem dossier.
+  All chemistry is computed on public LIT-PCBA, ChEMBL, and PubChem data.
+keywords:
+  - cheminformatics
+  - drug-discovery
+  - rdkit
+  - virtual-screening
+  - computational-chemistry
+  - medicinal-chemistry
+  - mcp

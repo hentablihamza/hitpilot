@@ -9,7 +9,7 @@ description = "Auditable hit-triage and med-chem copilot for public virtual-scre
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-authors = [{ name = "HitPilot contributors" }]
+authors = [{ name = "Hentabli Hamza" }]
 keywords = ["cheminformatics", "hit-triage", "rdkit", "lit-pcba", "virtual-screening"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
@@ -39,8 +39,25 @@ dev = ["pytest", "ruff"]
 hitpilot = "hitpilot.cli:app"
 hitpilot-mcp = "hitpilot.mcp_server:main"
 
+[project.urls]
+Homepage = "https://github.com/hentablihamza/hitpilot"
+Repository = "https://github.com/hentablihamza/hitpilot"
+Issues = "https://github.com/hentablihamza/hitpilot/issues"
+Changelog = "https://github.com/hentablihamza/hitpilot/blob/main/CHANGELOG.md"
+
 [tool.hatch.build.targets.sdist]
-include = ["src/hitpilot", "tests", "README.md", "pyproject.toml"]
+include = [
+  "src/hitpilot",
+  "tests",
+  "README.md",
+  "LICENSE",
+  "CITATION.cff",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "pyproject.toml",
+  "docs",
+  "examples",
+]
 
 [tool.ruff]
 line-length = 100
@@ -53,3 +70,6 @@ select = ["E", "F", "I", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra"]
+markers = [
+  "network: tests that require live network access (skipped in CI)",
+]
