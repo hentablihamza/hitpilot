@@ -37,6 +37,7 @@ dev = ["pytest", "ruff"]
 
 [project.scripts]
 hitpilot = "hitpilot.cli:app"
+hitpilot-mcp = "hitpilot.mcp_server:main"
 
 [tool.hatch.build.targets.sdist]
 include = ["src/hitpilot", "tests", "README.md", "pyproject.toml"]

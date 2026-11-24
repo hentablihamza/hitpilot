@@ -1,4 +1,4 @@
-"""Typer CLI for HitPilot hygiene, properties, novelty, and diversity."""
+"""Typer CLI for HitPilot hygiene, properties, novelty, diversity, and scoring."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from rich.table import Table
 from hitpilot.data.litpcba import KNOWN_TARGETS, LitPcbaError, fetch_litpcba, normalize_target
 from hitpilot.diversity import run_diversity_file
 from hitpilot.hygiene import run_hygiene_file
+from hitpilot.mcp_server import create_chem_mcp_server
 from hitpilot.models import (
     DiversityConfig,
     HygieneConfig,
@@ -22,6 +23,11 @@ from hitpilot.models import (
 from hitpilot.novelty import ChemblFetchError, fetch_chembl_target_actives, run_novelty_file
 from hitpilot.phase2 import run_phase2_file
 from hitpilot.properties import run_properties_file
+from hitpilot.scoring import (
+    ScorerHookConfig,
+    generate_litpcba_baseline_scores,
+    run_scorer_hook_file,
+)
 from hitpilot.version import __version__
 
 app = typer.Typer(
@@ -584,6 +590,213 @@ def phase2_command(
             ),
         ],
     )
+
+
+@app.command("baseline-score")
+def baseline_score_command(
+    target: str = typer.Argument("ESR1_ant", help="LIT-PCBA target name, e.g. ESR1_ant."),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Destination CSV for held-out _V scores (compound_id,score,model_name,split).",
+    ),
+    data_dir: Path = typer.Option(
+        Path("data/litpcba"),
+        "--data-dir",
+        help="Directory containing data/litpcba/<TARGET>/ split SMILES files.",
+    ),
+    random_state: int = typer.Option(42, "--random-state"),
+) -> None:
+    """Train an ECFP4 random forest on LIT-PCBA _T and score leak-free _V."""
+    try:
+        result = generate_litpcba_baseline_scores(
+            target=target,
+            data_dir=data_dir,
+            output_path=output,
+            random_state=random_state,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]Baseline scorer failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[green]Wrote[/green] {output}")
+    train = result["train_standardized"]
+    valid_raw = result["valid_standardized"]
+    leakfree = result["valid_leakfree"]
+    _print_kv_table(
+        f"LIT-PCBA {result['target']} leak-free baseline ({result['model_name']})",
+        [
+            (
+                "Train _T (standardized)",
+                f"{train['n']} ({train['n_active']} act / {train['n_inactive']} inact)",
+            ),
+            (
+                "Valid _V (standardized)",
+                f"{valid_raw['n']} ({valid_raw['n_active']} act / {valid_raw['n_inactive']} inact)",
+            ),
+            ("T/V SMILES overlap removed", result["n_overlap_removed"]),
+            (
+                "Held-out _V scored",
+                f"{leakfree['n']} ({leakfree['n_active']} act / {leakfree['n_inactive']} inact)",
+            ),
+            ("Random state", result["random_state"]),
+        ],
+    )
+
+
+@app.command("score")
+def score_command(
+    compounds_file: Path = typer.Argument(
+        ...,
+        exists=True,
+        readable=True,
+        help="Phase 1/2 compound table, e.g. phase2_enriched.csv.",
+    ),
+    scores_file: Path = typer.Argument(
+        ...,
+        exists=True,
+        readable=True,
+        help="External scorer CSV with a score column.",
+    ),
+    output_dir: Path = typer.Option(..., "--output-dir", "-o"),
+    score_column: str = typer.Option("score", "--score-column"),
+    id_column: str = typer.Option("compound_id", "--id-column"),
+    smiles_column: Optional[str] = typer.Option(None, "--smiles-column"),
+    higher_is_better: bool = typer.Option(
+        True,
+        "--higher-is-better/--lower-is-better",
+        help="ML probabilities/pIC50 vs docking energies (kcal/mol).",
+    ),
+    top_n: int = typer.Option(25, "--top-n"),
+    exclusion_similarity: float = typer.Option(0.65, "--exclusion-similarity"),
+    require_lipinski: bool = typer.Option(False, "--require-lipinski"),
+    require_veber: bool = typer.Option(False, "--require-veber"),
+    exclude_known_matches: bool = typer.Option(False, "--exclude-known-matches"),
+) -> None:
+    """Join an external scorer CSV, report VS enrichment, and write a diverse shortlist."""
+    config = ScorerHookConfig(
+        id_column=id_column,
+        smiles_column=smiles_column,
+        score_column=score_column,
+        higher_is_better=higher_is_better,
+        top_n=top_n,
+        diversity_cutoff=exclusion_similarity,
+        require_lipinski=require_lipinski,
+        require_veber=require_veber,
+        exclude_known_matches=exclude_known_matches,
+    )
+    _ranked, shortlist, summary, manifest = run_scorer_hook_file(
+        compounds_file,
+        scores_file,
+        output_dir,
+        config,
+    )
+    console.print(f"[green]Wrote[/green] {output_dir / 'ranked_compounds.csv'}")
+    console.print(f"[green]Wrote[/green] {output_dir / 'shortlist_topN_diverse.csv'}")
+    console.print(f"[green]Wrote[/green] {output_dir / 'audit_log.json'}")
+    console.print(
+        f"HitPilot {manifest.hitpilot_version}  RDKit {manifest.rdkit_version}  "
+        f"SHA-256 compounds {manifest.input_sha256[:12]}…  {manifest.timestamp_utc}"
+    )
+    _print_kv_table(
+        "Score merge",
+        [
+            ("Compounds", summary.n_compounds),
+            ("Score rows", summary.n_score_rows),
+            ("Matched", summary.n_matched),
+            ("Matched by ID", summary.n_matched_by_id),
+            ("Matched by SMILES", summary.n_matched_by_smiles),
+            ("Unmatched compounds", summary.n_unmatched_compounds),
+            ("Unmatched scores", summary.n_unmatched_scores),
+            ("Actives scored", summary.n_actives_scored),
+            ("Inactives scored", summary.n_inactives_scored),
+        ],
+    )
+    if summary.enrichment is not None:
+        metrics = summary.enrichment
+        _print_kv_table(
+            "Enrichment (scored, labeled compounds)",
+            [
+                ("ROC-AUC", metrics.roc_auc),
+                ("PR-AUC", metrics.pr_auc),
+                ("EF 1%", metrics.ef_1pct),
+                ("EF 5%", metrics.ef_5pct),
+                ("EF 10%", metrics.ef_10pct),
+                ("BEDROC α=20", metrics.bedroc_20),
+                ("BEDROC α=80.5", metrics.bedroc_80_5),
+                ("Hits top 25", metrics.hits_top_25),
+                ("Hits top 50", metrics.hits_top_50),
+                ("Hits top 100", metrics.hits_top_100),
+            ],
+        )
+    else:
+        console.print("[yellow]No enrichment metrics[/yellow] (need both actives and inactives).")
+    _print_kv_table(
+        f"Diverse shortlist (top {summary.top_n})",
+        [
+            ("Shortlist size", summary.n_shortlist),
+            (
+                "Diverse hits",
+                (
+                    str(summary.diverse_hits_top_n)
+                    if summary.diverse_hits_top_n is not None
+                    else ""
+                ),
+            ),
+            ("Unique Murcko scaffolds", summary.n_shortlist_scaffolds),
+            ("Gated out", summary.n_gated_out),
+        ],
+    )
+    if not shortlist.empty:
+        table = Table(title="Top diverse shortlist hits")
+        table.add_column("Rank", justify="right")
+        table.add_column("ID")
+        table.add_column("Score", justify="right")
+        table.add_column("Label")
+        show_cols = [
+            c
+            for c in (
+                "shortlist_rank",
+                "compound_id",
+                "score",
+                "label",
+                "mw",
+                "clogp",
+                "qed",
+                "sa_score",
+                "novelty_tier",
+                "max_tanimoto",
+            )
+            if c in shortlist.columns
+        ]
+        for extra in ("mw", "clogp", "qed", "novelty_tier"):
+            if extra in show_cols:
+                table.add_column(extra)
+        for _, row in shortlist.head(10).iterrows():
+            values = [
+                str(int(row["shortlist_rank"])) if "shortlist_rank" in shortlist.columns else "",
+                str(row.get("compound_id", "")),
+                f"{float(row['score']):.4f}",
+                str(row["label"]) if "label" in shortlist.columns else "",
+            ]
+            for extra in ("mw", "clogp", "qed", "novelty_tier"):
+                if extra in show_cols:
+                    val = row[extra]
+                    if extra == "novelty_tier":
+                        values.append("" if val is None else str(val))
+                    else:
+                        try:
+                            values.append(f"{float(val):.2f}")
+                        except (TypeError, ValueError):
+                            values.append("")
+            table.add_row(*values)
+        console.print(table)
+
+
+@app.command("mcp")
+def mcp_command() -> None:
+    """Launch the ChemMCP server over stdio."""
+    create_chem_mcp_server().run(transport="stdio")
 
 
 if __name__ == "__main__":

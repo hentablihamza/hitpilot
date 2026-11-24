@@ -71,6 +71,48 @@ Unified Phase 2 outputs:
 - `scaffold_summary.csv` — Bemis-Murcko scaffold frequencies
 - `audit_log.json` — UTC timestamp, versions, configs, input SHA-256, and exact summaries
 
+
+## Phase 3 quickstart
+
+Phase 3 adds a pluggable docking/ML rescorer CSV hook (with standard VS
+enrichment metrics and a score-ordered diverse shortlist) and **ChemMCP**,
+an MCP server that wraps the verified HitPilot tools.
+
+```bash
+# Leak-free baseline: train an ECFP4 random forest on LIT-PCBA _T, score _V
+.venv/bin/hitpilot baseline-score ESR1_ant \
+  --output outputs/phase3_ESR1_ant/baseline_ecfp4_rf_scores.csv
+
+# Join the scorer CSV onto Phase 2 compounds, rank, and pick a diverse top-25
+.venv/bin/hitpilot score outputs/phase2_ESR1_ant/phase2_enriched.csv \
+  outputs/phase3_ESR1_ant/baseline_ecfp4_rf_scores.csv \
+  --output-dir outputs/phase3_ESR1_ant --top-n 25
+
+# Launch ChemMCP over stdio (or use the hitpilot-mcp console script)
+.venv/bin/hitpilot mcp
+# equivalent: .venv/bin/hitpilot-mcp
+```
+
+Scorer hook outputs:
+
+- `ranked_compounds.csv` — Phase 1/2 compounds that received an external score, ranked best-first
+- `shortlist_topN_diverse.csv` — score-ordered sphere-exclusion shortlist (pairwise Morgan Tanimoto < 0.65 by default)
+- `audit_log.json` — SHA-256 checksums for both input files, config, enrichment metrics, and shortlist stats
+
+Use `--lower-is-better` when the external score is a docking energy (Vina/Glide kcal/mol). The default `--higher-is-better` is for ML probabilities or pIC50 values.
+
+Sample MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "ChemMCP": {
+      "command": ".venv/bin/hitpilot-mcp"
+    }
+  }
+}
+```
+
 ## Five-phase roadmap
 
 1. **Phase 1 — Hygiene and alerts.** RDKit parsing and sanitization, salt/solvent

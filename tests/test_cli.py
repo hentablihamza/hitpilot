@@ -264,3 +264,77 @@ def test_phase2_cli_with_mocked_chembl(tmp_path: Path, monkeypatch):
     assert "properties" in audit["summary"]
     assert "novelty" in audit["summary"]
     assert "diversity" in audit["summary"]
+
+
+
+def test_baseline_score_and_score_cli(tmp_path: Path):
+    ASPIRIN = "CC(=O)Oc1ccccc1C(=O)O"
+    BENZENE = "c1ccccc1"
+    HEXANE = "CCCCCC"
+    root = tmp_path / "litpcba" / "ESR1_ant"
+    root.mkdir(parents=True)
+    (root / "AID_active_T.smi").write_text(f"{IBUPROFEN} T-IBU\nCCO T-ETOH\n", encoding="utf-8")
+    (root / "AID_inactive_T.smi").write_text(f"{ASPIRIN} T-ASP\n{HEXANE} T-HEX\n", encoding="utf-8")
+    (root / "AID_active_V.smi").write_text(f"{BENZENE} V-BENZ\nCCO V-ETOH-LEAK\n", encoding="utf-8")
+    (root / "AID_inactive_V.smi").write_text("CCC V-PROP\n", encoding="utf-8")
+    scores_path = tmp_path / "baseline.csv"
+    result = runner.invoke(
+        app,
+        [
+            "baseline-score",
+            "ESR1_ant",
+            "--data-dir",
+            str(tmp_path / "litpcba"),
+            "--output",
+            str(scores_path),
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert "overlap removed" in result.output.lower() or (
+        "T/V SMILES overlap removed" in result.output
+    )
+    assert scores_path.is_file()
+    scores = pd.read_csv(scores_path, dtype={"compound_id": str})
+    assert set(scores["compound_id"]) == {"V-BENZ", "V-PROP"}
+
+    compounds = tmp_path / "compounds.csv"
+    compounds.write_text(
+        "compound_id,smiles,label\n"
+        f"V-BENZ,{BENZENE},active\n"
+        "V-PROP,CCC,inactive\n"
+        f"T-IBU,{IBUPROFEN},active\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "score_out"
+    result = runner.invoke(
+        app,
+        [
+            "score",
+            str(compounds),
+            str(scores_path),
+            "--output-dir",
+            str(out),
+            "--top-n",
+            "2",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert "Enrichment" in result.output
+    assert (out / "ranked_compounds.csv").is_file()
+    assert (out / "shortlist_topN_diverse.csv").is_file()
+    audit = json.loads((out / "audit_log.json").read_text(encoding="utf-8"))
+    assert audit["command"] == "score"
+    assert audit["config"]["scores_sha256"]
+    assert audit["config"]["compounds_sha256"] == audit["input_sha256"]
+    ranked = pd.read_csv(out / "ranked_compounds.csv", dtype={"compound_id": str})
+    assert "T-IBU" not in set(ranked["compound_id"])
+    assert set(ranked["compound_id"]) == {"V-BENZ", "V-PROP"}
+
+
+def test_cli_lists_phase3_commands():
+    result = runner.invoke(app, ["--help"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    for name in ("baseline-score", "score", "mcp"):
+        assert name in result.output
