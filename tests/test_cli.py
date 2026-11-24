@@ -120,3 +120,147 @@ def test_write_unified_csv_helper(tmp_path: Path):
     path = write_unified_csv(frame, tmp_path / "out.csv")
     loaded = pd.read_csv(path)
     assert list(loaded.columns) == ["compound_id", "smiles", "label"]
+
+
+
+IBUPROFEN = "CC(C)Cc1ccc(cc1)C(C)C(=O)O"
+ASPIRIN = "CC(=O)Oc1ccccc1C(=O)O"
+ETHANOL = "CCO"
+
+
+def _tiny_table(tmp_path: Path) -> Path:
+    path = tmp_path / "compounds.csv"
+    path.write_text(
+        "compound_id,smiles,label\n"
+        f"ibu,{IBUPROFEN},active\n"
+        f"asp,{ASPIRIN},inactive\n"
+        f"etoh,{ETHANOL},inactive\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_properties_cli(tmp_path: Path):
+    output_dir = tmp_path / "props"
+    result = runner.invoke(
+        app,
+        ["properties", str(_tiny_table(tmp_path)), "--output-dir", str(output_dir)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert "Property summary" in result.output
+    assert (output_dir / "properties.csv").is_file()
+    audit = json.loads((output_dir / "audit_log.json").read_text(encoding="utf-8"))
+    assert audit["command"] == "properties"
+    assert audit["summary"]["n_total"] == 3
+
+
+def test_fetch_chembl_cli_uses_cache_dir(tmp_path: Path, monkeypatch):
+    import hitpilot.cli as cli_mod
+    from hitpilot.models import ChemblActive
+    from hitpilot.novelty import canonicalize_smiles
+
+    def fake_fetch(*args, **kwargs):
+        cache_dir = Path(kwargs["cache_dir"])
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        actives = [
+            ChemblActive(
+                molecule_chembl_id="CHEMBL521",
+                smiles=IBUPROFEN,
+                canonical_smiles=canonicalize_smiles(IBUPROFEN),
+                pchembl_value=7.2,
+                target_chembl_id="CHEMBL206",
+            )
+        ]
+        (cache_dir / "CHEMBL206_actives.csv").write_text(
+            "molecule_chembl_id,smiles,canonical_smiles,pchembl_value,target_chembl_id\n"
+            f"CHEMBL521,{IBUPROFEN},{actives[0].canonical_smiles},7.2,CHEMBL206\n",
+            encoding="utf-8",
+        )
+        return actives
+
+    monkeypatch.setattr(cli_mod, "fetch_chembl_target_actives", fake_fetch)
+    result = runner.invoke(
+        app,
+        ["fetch-chembl", "CHEMBL206", "--cache-dir", str(tmp_path / "chembl")],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert "Unique actives" in result.output
+    assert "CHEMBL206" in result.output
+
+
+def test_novelty_and_diversity_cli(tmp_path: Path, monkeypatch):
+    import hitpilot.novelty as novelty_mod
+    from hitpilot.models import ChemblActive
+    from hitpilot.novelty import canonicalize_smiles
+
+    refs = [
+        ChemblActive(
+            molecule_chembl_id="CHEMBL521",
+            smiles=IBUPROFEN,
+            canonical_smiles=canonicalize_smiles(IBUPROFEN),
+            pchembl_value=7.2,
+            target_chembl_id="CHEMBL206",
+        )
+    ]
+    monkeypatch.setattr(novelty_mod, "fetch_chembl_target_actives", lambda **kwargs: refs)
+    table = _tiny_table(tmp_path)
+    nov_dir = tmp_path / "nov"
+    result = runner.invoke(
+        app,
+        ["novelty", str(table), "--output-dir", str(nov_dir), "--target-chembl-id", "CHEMBL206"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert (nov_dir / "novelty.csv").is_file()
+
+    div_dir = tmp_path / "div"
+    result = runner.invoke(
+        app,
+        ["diversity", str(table), "--output-dir", str(div_dir)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert (div_dir / "diverse_subset.csv").is_file()
+    assert (div_dir / "scaffold_summary.csv").is_file()
+
+
+def test_phase2_cli_with_mocked_chembl(tmp_path: Path, monkeypatch):
+    import hitpilot.phase2 as phase2_mod
+    from hitpilot.models import ChemblActive
+    from hitpilot.novelty import canonicalize_smiles
+
+    refs = [
+        ChemblActive(
+            molecule_chembl_id="CHEMBL521",
+            smiles=IBUPROFEN,
+            canonical_smiles=canonicalize_smiles(IBUPROFEN),
+            pchembl_value=7.2,
+            target_chembl_id="CHEMBL206",
+        )
+    ]
+    monkeypatch.setattr(phase2_mod, "fetch_chembl_target_actives", lambda **kwargs: refs)
+    output_dir = tmp_path / "phase2"
+    result = runner.invoke(
+        app,
+        [
+            "phase2",
+            str(_tiny_table(tmp_path)),
+            "--output-dir",
+            str(output_dir),
+            "--target-chembl-id",
+            "CHEMBL206",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    assert (output_dir / "phase2_enriched.csv").is_file()
+    assert (output_dir / "diverse_subset.csv").is_file()
+    assert (output_dir / "scaffold_summary.csv").is_file()
+    audit = json.loads((output_dir / "audit_log.json").read_text(encoding="utf-8"))
+    assert audit["command"] == "phase2"
+    assert audit["summary"]["n_input"] == 3
+    assert "properties" in audit["summary"]
+    assert "novelty" in audit["summary"]
+    assert "diversity" in audit["summary"]

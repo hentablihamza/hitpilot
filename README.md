@@ -38,6 +38,39 @@ By default PAINS, Brenk, and NIH matches are recorded and dropped (`drop_pains`,
 `drop_brenk`, and `drop_nih` all default to `true`). Pass `--no-drop-nih` (or the
 equivalent flags for PAINS/Brenk) to keep those compounds and flag them only.
 
+
+## Phase 2 quickstart
+
+Phase 2 scores the compounds that passed hygiene for physicochemical
+properties (including the real Ertl SA score), ChEMBL nearest-neighbor
+novelty, Bemis-Murcko scaffolds, Butina clusters, and a sphere-exclusion
+diverse subset.
+
+```bash
+# Fetch unique CHEMBL206 actives (pChEMBL >= 6.0, cached under data/chembl/)
+.venv/bin/hitpilot fetch-chembl CHEMBL206 --pchembl-min 6.0 --max-records 2000
+
+# Run properties, novelty, and diversity together on Phase 1 survivors
+.venv/bin/hitpilot phase2 outputs/phase1_ESR1_ant/passed_compounds.csv \
+  --target-chembl-id CHEMBL206 \
+  --output-dir outputs/phase2_ESR1_ant
+
+# Or run each step on its own
+.venv/bin/hitpilot properties outputs/phase1_ESR1_ant/passed_compounds.csv \
+  --output-dir outputs/phase2_ESR1_ant/properties
+.venv/bin/hitpilot novelty outputs/phase1_ESR1_ant/passed_compounds.csv \
+  --target-chembl-id CHEMBL206 --output-dir outputs/phase2_ESR1_ant/novelty
+.venv/bin/hitpilot diversity outputs/phase1_ESR1_ant/passed_compounds.csv \
+  --output-dir outputs/phase2_ESR1_ant/diversity
+```
+
+Unified Phase 2 outputs:
+
+- `phase2_enriched.csv` — Phase 1 columns plus descriptors, novelty tiers, scaffolds, and cluster/sphere assignments
+- `diverse_subset.csv` — sphere-exclusion representatives (no two share Morgan Tanimoto >= 0.65 by default)
+- `scaffold_summary.csv` — Bemis-Murcko scaffold frequencies
+- `audit_log.json` — UTC timestamp, versions, configs, input SHA-256, and exact summaries
+
 ## Five-phase roadmap
 
 1. **Phase 1 — Hygiene and alerts.** RDKit parsing and sanitization, salt/solvent
